@@ -1,58 +1,81 @@
-import java.io.*;
-import java.util.*;
-import org.json.simple.*;
-import org.json.simple.parser.*;
-import org.json.simple.JSONObject;
-import org.json.simple.parser.JSONParser;
-
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 
 public class FileHandler {
-    //File where encrypted password is stored
-    private final String filename = "passwords.json";
+    private static final String VAULT_FILE = "passwords.db";
+    private static final String SALT_FILE = "salt.bin";
+    private static final String VERIFIER_FILE = "verifier.bin";
 
-    //Loads pass data from File
-    //Returns JSON object containing all passes
-    public JSONObject loadPasswords() {
-        try (FileReader reader = new FileReader(filename)) {
-            //Parse and return JSON file
-            return (JSONObject) new JSONParser().parse(reader);
-        } catch (Exception e) {
-            //If file not found or corrupted, return new empty JSON objkect
-            return new JSONObject();
+    public List<VaultEntry> loadEntries() {
+        Path path = Path.of(VAULT_FILE);
+        if (!Files.exists(path)) {
+            return new ArrayList<>();
+        }
+
+        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(VAULT_FILE))) {
+            Object data = in.readObject();
+            if (data instanceof List<?>) {
+                List<?> raw = (List<?>) data;
+                List<VaultEntry> entries = new ArrayList<>();
+                for (Object item : raw) {
+                    if (item instanceof VaultEntry entry) {
+                        entries.add(entry);
+                    }
+                }
+                return entries;
+            }
+        } catch (Exception ignored) {
+        }
+
+        return new ArrayList<>();
+    }
+
+    public void saveEntries(List<VaultEntry> entries) throws IOException {
+        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(VAULT_FILE))) {
+            out.writeObject(entries);
         }
     }
 
-    //Saves the pass data to JSON file
-    public void savePasswords(JSONObject data) {
-        try (FileWriter writer = new FileWriter(filename)) {
-            //Write the data as JSON string
-            writer.write(data.toJSONString());
-        } catch (IOException e) {
-            //Print error on message
-            System.out.println("Error saving passwords.");
-        }
-    }
-
-    //Saves generated salt to bin file
-    public void saveSalt(byte[] salt) {
-        try (FileOutputStream out = new FileOutputStream("salt.bin")) {
-            //Write the raw bytes to a file
+    public void saveSalt(byte[] salt) throws IOException {
+        try (FileOutputStream out = new FileOutputStream(SALT_FILE)) {
             out.write(salt);
-        } catch (IOException e) {
-            //Handle save errors
-            System.out.println("Error saving salt.");
         }
     }
 
-
-    //Loads salt from bin file
-    //Returns the byte array used in key derivation
     public byte[] loadSalt() {
-        try (FileInputStream in = new FileInputStream("salt.bin")) {
+        try (FileInputStream in = new FileInputStream(SALT_FILE)) {
             return in.readAllBytes();
         } catch (IOException e) {
-            //null if file doesnt exist
             return null;
         }
+    }
+
+    public void saveVerifier(Encryption.EncryptedData verifier) throws IOException {
+        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(VERIFIER_FILE))) {
+            out.writeObject(verifier);
+        }
+    }
+
+    public Encryption.EncryptedData loadVerifier() {
+        Path path = Path.of(VERIFIER_FILE);
+        if (!Files.exists(path)) {
+            return null;
+        }
+
+        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(VERIFIER_FILE))) {
+            Object data = in.readObject();
+            if (data instanceof Encryption.EncryptedData encryptedData) {
+                return encryptedData;
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
     }
 }
