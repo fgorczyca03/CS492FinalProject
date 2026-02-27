@@ -1,57 +1,55 @@
-import java.util.Scanner;
 import javax.crypto.SecretKey;
+import javax.swing.*;
 
 public class Main {
-    public static void main(String[] args) throws Exception {
-        Scanner scanner = new Scanner(System.in); //Read user input
-        FileHandler fileHandler = new FileHandler(); //For saving or loading data and salt
+    private static final String VAULT_CHECK_VALUE = "vault-unlocked";
 
-        //load the saved salt
-        byte[] salt = fileHandler.loadSalt();
-        if (salt == null) {
-            //if no salt file exists, genereate one and prompt for master pass creation
-            salt = Encryption.generateSalt();
-            fileHandler.saveSalt(salt);
-            System.out.print("Create master password: ");
-        } else {
-            //If salt.bin exist, prompt user for the maspass
-            System.out.print("Enter master password: ");
-        }
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> {
+            try {
+                FileHandler fileHandler = new FileHandler();
+                byte[] salt = fileHandler.loadSalt();
 
-        String masterPassword = scanner.nextLine(); //User input for Master Password
-        SecretKey key = Encryption.deriveKey(masterPassword, salt); //Derive the AES enc key from master password and salt
+                String prompt = (salt == null) ? "Create a master password:" : "Enter master password:";
+                String masterPassword = promptForPassword(prompt);
+                if (masterPassword == null || masterPassword.isBlank()) {
+                    return;
+                }
 
-        //Init enc and password manager with derived key
-        Encryption encryption = new Encryption(key);
-        PasswordManager pm = new PasswordManager(encryption);
+                if (salt == null) {
+                    salt = Encryption.generateSalt();
+                    fileHandler.saveSalt(salt);
+                }
 
-        //main prog loop
-        while (true) {
-            //Show menu items
-            System.out.println("\n1. Add Password\n2. Retrieve Password\n3. Exit");
-            System.out.print("Choice: ");
-            String choice = scanner.nextLine();
+                SecretKey key = Encryption.deriveKey(masterPassword, salt);
+                Encryption encryption = new Encryption(key);
 
-            if (choice.equals("1")) {
-                // add password
-                System.out.print("Site: ");
-                String site = scanner.nextLine();
-                System.out.print("Password: ");
-                String password = scanner.nextLine();
-                pm.addPassword(site, password);
-            } else if (choice.equals("2")) {
-                //retrieve password
-                System.out.print("Site: ");
-                String site = scanner.nextLine();
-                pm.getPassword(site);
-            } else if (choice.equals("3")) {
-                //exit the program
-                break;
-            } else {
-                //invalid input handling
-                System.out.println("Invalid choice.");
+                Encryption.EncryptedData verifier = fileHandler.loadVerifier();
+                if (verifier == null) {
+                    fileHandler.saveVerifier(encryption.encrypt(VAULT_CHECK_VALUE));
+                } else {
+                    String check = encryption.decrypt(verifier);
+                    if (!VAULT_CHECK_VALUE.equals(check)) {
+                        JOptionPane.showMessageDialog(null, "Invalid master password.", "Access denied", JOptionPane.ERROR_MESSAGE);
+                        return;
+                    }
+                }
+
+                PasswordManager manager = new PasswordManager(encryption, fileHandler);
+                PasswordManagerUI ui = new PasswordManagerUI(manager);
+                ui.setVisible(true);
+            } catch (Exception e) {
+                JOptionPane.showMessageDialog(null, "Failed to open vault: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
             }
+        });
+    }
+
+    private static String promptForPassword(String message) {
+        JPasswordField field = new JPasswordField();
+        int option = JOptionPane.showConfirmDialog(null, field, message, JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        if (option != JOptionPane.OK_OPTION) {
+            return null;
         }
-        scanner.close(); //close input loop
+        return new String(field.getPassword());
     }
 }

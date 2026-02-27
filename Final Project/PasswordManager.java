@@ -1,55 +1,96 @@
-import org.json.simple.JSONObject;
-import org.json.simple.JSONObject;
-import org.json.simple.parser.JSONParser;
-
-
+import java.security.SecureRandom;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 
 public class PasswordManager {
-    //References to other files
     private final Encryption encryption;
     private final FileHandler fileHandler;
-    //JSON object that stores all site password entries in memory
-    private final JSONObject passwordStore;
+    private final List<VaultEntry> entries;
 
-    //Inits components and loads saved passes from file
-    public PasswordManager(Encryption encryption) {
+    public PasswordManager(Encryption encryption, FileHandler fileHandler) {
         this.encryption = encryption;
-        this.fileHandler = new FileHandler();
-        this.passwordStore = fileHandler.loadPasswords();
+        this.fileHandler = fileHandler;
+        this.entries = fileHandler.loadEntries();
     }
 
-    //add password
-    public void addPassword(String site, String password) throws Exception {
-        //encrypt the password
-        String[] result = encryption.encrypt(password);
-        //Create a JSON object to store all 3 componenets
-        JSONObject entry = new JSONObject();
-        entry.put("iv", result[0]);
-        entry.put("password", result[1]);
-        entry.put("hash", result[2]);
-        //Store the encrypted entry under site name
-        passwordStore.put(site, entry);
-
-        //Save the updated paswsword to the JSON fikle
-        fileHandler.savePasswords(passwordStore);
-        System.out.println("Password saved.");
+    public List<VaultEntry> getAllEntries() {
+        List<VaultEntry> copy = new ArrayList<>(entries);
+        copy.sort(Comparator.comparing(VaultEntry::getTitle, String.CASE_INSENSITIVE_ORDER));
+        return copy;
     }
 
-    //Retrieve and decrypt passwords for a given site
-    public void getPassword(String site) throws Exception {
-        //Get the JSON object corresponding to site
-        JSONObject entry = (JSONObject) passwordStore.get(site);
-        if (entry == null) {
-            System.out.println("No password found.");
-            return;
+    public List<VaultEntry> search(String query) {
+        if (query == null || query.isBlank()) {
+            return getAllEntries();
         }
 
-        //decrypt the password using IV, CT and hash
-        String decrypted = encryption.decrypt(
-            (String) entry.get("iv"),
-            (String) entry.get("password"),
-            (String) entry.get("hash")
-        );
-        System.out.println("Password: " + decrypted);
+        String needle = query.trim().toLowerCase();
+        List<VaultEntry> results = new ArrayList<>();
+        for (VaultEntry entry : entries) {
+            if (containsIgnoreCase(entry.getTitle(), needle)
+                    || containsIgnoreCase(entry.getUsername(), needle)
+                    || containsIgnoreCase(entry.getWebsite(), needle)
+                    || containsIgnoreCase(entry.getNotes(), needle)) {
+                results.add(entry);
+            }
+        }
+        results.sort(Comparator.comparing(VaultEntry::getTitle, String.CASE_INSENSITIVE_ORDER));
+        return results;
+    }
+
+    public VaultEntry createEntry(String title, String username, String website, String notes, String plainPassword) throws Exception {
+        VaultEntry entry = new VaultEntry(title, username, website, notes, encryption.encrypt(plainPassword));
+        entries.add(entry);
+        persist();
+        return entry;
+    }
+
+    public void updateEntry(String id, String title, String username, String website, String notes, String plainPassword) throws Exception {
+        VaultEntry existing = findById(id);
+        if (existing == null) {
+            throw new IllegalArgumentException("Entry no longer exists.");
+        }
+        existing.update(title, username, website, notes, encryption.encrypt(plainPassword));
+        persist();
+    }
+
+    public void deleteEntry(String id) throws Exception {
+        VaultEntry existing = findById(id);
+        if (existing != null) {
+            entries.remove(existing);
+            persist();
+        }
+    }
+
+    public String decryptPassword(VaultEntry entry) throws Exception {
+        return encryption.decrypt(entry.getEncryptedPassword());
+    }
+
+    public static String generatePassword(int length) {
+        final String chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+-=[]{}";
+        SecureRandom random = new SecureRandom();
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < length; i++) {
+            builder.append(chars.charAt(random.nextInt(chars.length())));
+        }
+        return builder.toString();
+    }
+
+    private VaultEntry findById(String id) {
+        for (VaultEntry entry : entries) {
+            if (entry.getId().equals(id)) {
+                return entry;
+            }
+        }
+        return null;
+    }
+
+    private void persist() throws Exception {
+        fileHandler.saveEntries(entries);
+    }
+
+    private boolean containsIgnoreCase(String text, String needle) {
+        return text != null && text.toLowerCase().contains(needle);
     }
 }
